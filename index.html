@@ -3,103 +3,73 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NISA Black-Litterman Portfolio Optimizer</title>
+  <title>NISA Portfolio Optimizer</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="container">
     <header class="hero">
       <div>
-        <p class="eyebrow">Browser-only / no Python backend</p>
-        <h1>NISA Black–Litterman Portfolio Optimizer</h1>
-        <p class="lead">
-          CSVの価格履歴から共分散行列を推定し、市場均衡リターンに投資家Viewを反映して、
-          long-only制約付きポートフォリオをブラウザ内だけで最適化します。
-        </p>
+        <p class="eyebrow">Black–Litterman / browser only</p>
+        <h1>NISA Portfolio Optimizer</h1>
+        <p class="lead">価格データとあなたの見通しから、分散を考慮したポートフォリオをブラウザ内だけで計算します。</p>
       </div>
-      <div class="badge">Local computation</div>
+      <div class="badge">Local only</div>
     </header>
 
-    <section class="grid two">
-      <article class="card">
-        <h2>1. Price data</h2>
-        <p class="muted">形式: <code>Date,Asset1,Asset2,...</code>。値は調整後価格を想定します。</p>
-        <div class="row">
-          <input id="csvFile" type="file" accept=".csv,text/csv">
-          <button id="loadSampleBtn" class="secondary">サンプルを使う</button>
+    <section class="card controls">
+      <div class="control-block data-block">
+        <span class="step">1</span>
+        <div class="control-content">
+          <h2>データ</h2>
+          <div class="inline">
+            <label class="file-button">
+              CSVを選択
+              <input id="csvFile" type="file" accept=".csv,text/csv">
+            </label>
+            <button id="loadSampleBtn" class="secondary">サンプル</button>
+          </div>
+          <p id="dataStatus" class="status compact">CSVまたはサンプルを読み込んでください。</p>
         </div>
-        <div id="dataStatus" class="status">CSVを選ぶか、サンプルを読み込んでください。</div>
-      </article>
-
-      <article class="card">
-        <h2>2. Model parameters</h2>
-        <div class="form-grid">
-          <label>
-            Risk aversion δ
-            <input id="riskAversion" type="number" min="0.1" step="0.1" value="2.5">
-          </label>
-          <label>
-            τ
-            <input id="tau" type="number" min="0.0001" step="0.01" value="0.05">
-          </label>
-          <label>
-            Optimizer λ
-            <input id="lambda" type="number" min="0.01" step="0.1" value="3.0">
-          </label>
-          <label>
-            Max weight
-            <input id="maxWeight" type="number" min="0.01" max="1" step="0.05" value="0.50">
-          </label>
-          <label>
-            Risk-free rate
-            <input id="riskFree" type="number" step="0.001" value="0.01">
-          </label>
-          <label>
-            Trading days / year
-            <input id="annualization" type="number" min="1" step="1" value="252">
-          </label>
-        </div>
-      </article>
-    </section>
-
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>3. Market weights</h2>
-          <p class="muted">均衡リターン Π = δΣw<sub>mkt</sub> の基準ウェイトです。</p>
-        </div>
-        <button id="equalWeightsBtn" class="secondary">均等ウェイト</button>
       </div>
-      <div id="marketWeights"></div>
-    </section>
 
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>4. Investor views</h2>
-          <p class="muted">「AがBを年率x%上回る」というrelative viewを設定します。</p>
+      <div class="control-block">
+        <span class="step">2</span>
+        <div class="control-content">
+          <h2>分散ルール</h2>
+          <label class="slider-label">
+            1資産の上限
+            <input id="maxWeight" type="range" min="20" max="100" step="5" value="50">
+            <output id="maxWeightOutput">50%</output>
+          </label>
         </div>
-        <button id="addViewBtn" class="secondary">+ View</button>
       </div>
-      <div id="views"></div>
-    </section>
 
-    <section class="card action-card">
-      <div>
-        <h2>5. Optimize</h2>
-        <p class="muted">Black–Litterman事後期待リターンを計算し、long-only / fully-investedで最適化します。</p>
+      <div class="control-block views-block">
+        <span class="step">3</span>
+        <div class="control-content">
+          <div class="section-head">
+            <div>
+              <h2>あなたの見通し</h2>
+              <p class="hint">例: S&P 500 が All Country を年率2%上回る</p>
+            </div>
+            <button id="addViewBtn" class="secondary small">+ 見通し</button>
+          </div>
+          <div id="views" class="views"></div>
+        </div>
       </div>
-      <button id="optimizeBtn" class="primary">Optimize portfolio</button>
+
+      <button id="optimizeBtn" class="primary optimize-button">最適化する</button>
     </section>
 
     <section id="results" class="results hidden">
       <div class="metrics">
         <article class="metric">
-          <span>Expected return</span>
+          <span>期待リターン / 年</span>
           <strong id="metricReturn">—</strong>
         </article>
         <article class="metric">
-          <span>Volatility</span>
+          <span>予想変動率 / 年</span>
           <strong id="metricVol">—</strong>
         </article>
         <article class="metric">
@@ -108,52 +78,89 @@
         </article>
       </div>
 
-      <section class="grid two">
-        <article class="card">
-          <h2>Optimal allocation</h2>
+      <section class="dashboard-grid">
+        <article class="card panel allocation-panel">
+          <div class="panel-head">
+            <div>
+              <h2>最適配分</h2>
+              <p class="hint">Black–Litterman事後リターンに基づく配分</p>
+            </div>
+          </div>
           <div id="allocationChart" class="bar-chart"></div>
         </article>
 
-        <article class="card">
-          <h2>Prior → posterior</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Asset</th>
-                  <th>Prior Π</th>
-                  <th>BL posterior</th>
-                  <th>Weight</th>
-                </tr>
-              </thead>
-              <tbody id="resultsTable"></tbody>
-            </table>
+        <article class="card panel">
+          <div class="panel-head">
+            <div>
+              <h2>効率的フロンティア</h2>
+              <p class="hint">横軸: リスク　縦軸: 期待リターン</p>
+            </div>
           </div>
+          <div id="frontierChart" class="svg-chart"></div>
+        </article>
+
+        <article class="card panel forecast-panel">
+          <div class="panel-head">
+            <div>
+              <h2>将来リターンの予測レンジ</h2>
+              <p class="hint">現在を100とした10年先までのモデル上の分布</p>
+            </div>
+            <div class="legend">
+              <span><i class="legend-band wide"></i>80%レンジ</span>
+              <span><i class="legend-band inner"></i>50%レンジ</span>
+              <span><i class="legend-line"></i>中央値</span>
+            </div>
+          </div>
+          <div id="forecastChart" class="svg-chart forecast-chart"></div>
+          <div id="forecastSummary" class="forecast-summary"></div>
+          <p class="forecast-note">予測レンジはBlack–Littermanの期待リターンと過去データの共分散を使った確率モデルであり、将来の収益を保証するものではありません。</p>
+        </article>
+
+        <article class="card panel detail-panel">
+          <details>
+            <summary>モデル詳細を見る</summary>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Asset</th>
+                    <th>Prior</th>
+                    <th>Posterior</th>
+                    <th>Weight</th>
+                  </tr>
+                </thead>
+                <tbody id="resultsTable"></tbody>
+              </table>
+            </div>
+            <p class="model-note">
+              内部設定: equal-weight prior, δ=2.5, τ=0.05, λ=3.0, risk-free=1%, 年率換算252日。
+            </p>
+          </details>
         </article>
       </section>
     </section>
 
-    <section class="card note">
-      <strong>注意:</strong>
-      本ツールは研究・学習用の試作です。税制上のNISA対象可否、売買コスト、為替、分配金、
-      ファンド固有の制約などは自動判定しません。
-    </section>
+    <footer class="footer">
+      研究・学習用の試作です。NISA対象可否、税制、売買コスト、為替、分配金等は自動判定しません。
+    </footer>
   </main>
 
   <template id="viewTemplate">
     <div class="view-row">
       <select class="view-long"></select>
-      <span>が</span>
+      <span class="connector">が</span>
       <select class="view-short"></select>
-      <span>を年率</span>
-      <input class="view-return" type="number" step="0.1" value="2.0">
-      <span>%上回る</span>
+      <span class="connector">を年率</span>
+      <div class="percent-input">
+        <input class="view-return" type="number" step="0.1" value="2.0" aria-label="Expected relative return">
+        <span>%</span>
+      </div>
       <label class="confidence">
-        confidence
+        確信度
         <input class="view-confidence" type="range" min="5" max="95" step="5" value="70">
         <output class="view-confidence-output">70%</output>
       </label>
-      <button class="danger remove-view" aria-label="Remove view">×</button>
+      <button class="danger remove-view" aria-label="見通しを削除">×</button>
     </div>
   </template>
 
