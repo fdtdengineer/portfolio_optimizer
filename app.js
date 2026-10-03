@@ -1,14 +1,22 @@
 'use strict';
 
+const MODEL = Object.freeze({
+  riskAversion: 2.5,
+  tau: 0.05,
+  lambda: 3.0,
+  riskFree: 0.01,
+  annualization: 252
+});
+
 const state = {
   assets: [],
   prices: [],
   returns: [],
-  covariance: [],
-  marketWeights: []
+  covariance: []
 };
 
 const $ = (id) => document.getElementById(id);
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 $('csvFile').addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
@@ -24,18 +32,16 @@ $('csvFile').addEventListener('change', async (event) => {
 
 $('loadSampleBtn').addEventListener('click', () => {
   const sample = generateSampleData();
-  loadDataset(sample.assets, sample.prices, 'built-in synthetic sample');
+  loadDataset(sample.assets, sample.prices, 'サンプルデータ');
 });
 
-$('equalWeightsBtn').addEventListener('click', () => {
-  if (!state.assets.length) return;
-  state.marketWeights = Array(state.assets.length).fill(1 / state.assets.length);
-  renderMarketWeights();
+$('maxWeight').addEventListener('input', () => {
+  $('maxWeightOutput').value = `${$('maxWeight').value}%`;
 });
 
 $('addViewBtn').addEventListener('click', () => {
   if (state.assets.length < 2) {
-    setStatus('2資産以上の価格データを先に読み込んでください。', true);
+    setStatus('先に2資産以上のデータを読み込んでください。', true);
     return;
   }
   addView();
@@ -53,8 +59,6 @@ function setStatus(message, isError = false) {
   const el = $('dataStatus');
   el.textContent = message;
   el.style.color = isError ? '#b42318' : '';
-  el.style.borderColor = isError ? '#f0b7b2' : '';
-  el.style.background = isError ? '#fff4f2' : '';
 }
 
 function parsePriceCSV(text) {
@@ -97,20 +101,13 @@ function loadDataset(assets, prices, sourceName) {
   state.assets = assets;
   state.prices = prices;
   state.returns = logReturns(prices);
-  state.covariance = covarianceMatrix(
-    state.returns,
-    Number($('annualization').value) || 252
-  );
-  state.marketWeights = Array(assets.length).fill(1 / assets.length);
+  state.covariance = covarianceMatrix(state.returns, MODEL.annualization);
 
-  renderMarketWeights();
   $('views').replaceChildren();
   if (assets.length >= 2) addView();
 
   $('results').classList.add('hidden');
-  setStatus(
-    `${sourceName}: ${prices.length} observations / ${assets.length} assets loaded.`
-  );
+  setStatus(`${sourceName}: ${prices.length}日 / ${assets.length}資産を読み込みました。`);
 }
 
 function logReturns(prices) {
@@ -140,10 +137,9 @@ function covarianceMatrix(rows, annualization = 252) {
     }
   }
 
-  const denom = nObs - 1;
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) {
-      cov[i][j] = (cov[i][j] / denom) * annualization;
+      cov[i][j] = (cov[i][j] / (nObs - 1)) * annualization;
     }
   }
 
@@ -157,38 +153,6 @@ function regularizeCovariance(cov) {
   return cov.map((row, i) =>
     row.map((value, j) => value + (i === j ? ridge : 0))
   );
-}
-
-function renderMarketWeights() {
-  const root = $('marketWeights');
-  root.replaceChildren();
-
-  state.assets.forEach((asset, i) => {
-    const row = document.createElement('div');
-    row.className = 'weight-row';
-
-    const name = document.createElement('strong');
-    name.textContent = asset;
-
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '0';
-    slider.max = '100';
-    slider.step = '0.5';
-    slider.value = String(state.marketWeights[i] * 100);
-
-    const value = document.createElement('span');
-    value.className = 'weight-value';
-    value.textContent = `${Number(slider.value).toFixed(1)}%`;
-
-    slider.addEventListener('input', () => {
-      state.marketWeights[i] = Number(slider.value) / 100;
-      value.textContent = `${Number(slider.value).toFixed(1)}%`;
-    });
-
-    row.append(name, slider, value);
-    root.append(row);
-  });
 }
 
 function addView() {
@@ -209,34 +173,22 @@ function addView() {
     confidenceOutput.value = `${confidence.value}%`;
   });
 
-  fragment.querySelector('.remove-view').addEventListener('click', () => {
-    row.remove();
-  });
-
+  fragment.querySelector('.remove-view').addEventListener('click', () => row.remove());
   $('views').append(fragment);
-}
-
-function getNormalizedMarketWeights() {
-  const raw = state.marketWeights.map((x) => Math.max(0, Number(x) || 0));
-  const total = raw.reduce((a, b) => a + b, 0);
-  if (total <= 0) {
-    throw new Error('Market weightsの合計を0より大きくしてください。');
-  }
-  return raw.map((x) => x / total);
 }
 
 function collectViews() {
   const n = state.assets.length;
-  const rows = [...document.querySelectorAll('.view-row')];
   const P = [];
   const Q = [];
   const confidences = [];
 
-  for (const row of rows) {
+  for (const row of document.querySelectorAll('.view-row')) {
     const longAsset = row.querySelector('.view-long').value;
     const shortAsset = row.querySelector('.view-short').value;
+
     if (longAsset === shortAsset) {
-      throw new Error('Viewの比較対象は異なる資産を選んでください。');
+      throw new Error('見通しでは異なる2資産を選んでください。');
     }
 
     const p = Array(n).fill(0);
@@ -246,7 +198,7 @@ function collectViews() {
     const q = Number(row.querySelector('.view-return').value) / 100;
     const confidence = Number(row.querySelector('.view-confidence').value) / 100;
 
-    if (!Number.isFinite(q)) throw new Error('Viewの期待超過リターンが不正です。');
+    if (!Number.isFinite(q)) throw new Error('見通しの期待超過リターンが不正です。');
 
     P.push(p);
     Q.push(q);
@@ -257,7 +209,6 @@ function collectViews() {
 }
 
 function blackLitterman(cov, marketWeights, delta, tau, views) {
-  const n = cov.length;
   const prior = scaleVector(matVec(cov, marketWeights), delta);
 
   if (!views.P.length) {
@@ -266,32 +217,27 @@ function blackLitterman(cov, marketWeights, delta, tau, views) {
 
   const tauSigma = scaleMatrix(cov, tau);
   const invTauSigma = inverse(tauSigma);
-
-  const m = views.P.length;
-  const omegaDiag = [];
-
-  for (let i = 0; i < m; i++) {
-    const p = views.P[i];
-    const viewVariance = Math.max(dot(p, matVec(tauSigma, p)), 1e-12);
+  const omegaDiag = views.P.map((p, i) => {
+    const variance = Math.max(dot(p, matVec(tauSigma, p)), 1e-12);
     const c = views.confidences[i];
-    omegaDiag.push(Math.max(viewVariance * ((1 - c) / c), 1e-12));
-  }
+    return Math.max(variance * ((1 - c) / c), 1e-12);
+  });
 
   const invOmega = diagonal(omegaDiag.map((x) => 1 / x));
   const Pt = transpose(views.P);
-
   const precision = addMatrices(
     invTauSigma,
     matMul(matMul(Pt, invOmega), views.P)
   );
-
   const rhs = addVectors(
     matVec(invTauSigma, prior),
     matVec(matMul(Pt, invOmega), views.Q)
   );
 
-  const posterior = matVec(inverse(precision), rhs);
-  return { prior, posterior };
+  return {
+    prior,
+    posterior: matVec(inverse(precision), rhs)
+  };
 }
 
 function optimizeAndRender() {
@@ -299,56 +245,40 @@ function optimizeAndRender() {
     throw new Error('先にCSVまたはサンプルデータを読み込んでください。');
   }
 
-  const annualization = Number($('annualization').value) || 252;
-  state.covariance = covarianceMatrix(state.returns, annualization);
+  state.covariance = covarianceMatrix(state.returns, MODEL.annualization);
 
-  const delta = positiveNumber('riskAversion', 'Risk aversion δ');
-  const tau = positiveNumber('tau', 'τ');
-  const lambda = positiveNumber('lambda', 'Optimizer λ');
-  const maxWeight = Number($('maxWeight').value);
-  const riskFree = Number($('riskFree').value);
-
-  if (!(maxWeight > 0 && maxWeight <= 1)) {
-    throw new Error('Max weightは0より大きく1以下にしてください。');
-  }
+  const maxWeight = Number($('maxWeight').value) / 100;
   if (maxWeight * state.assets.length < 1 - 1e-12) {
     throw new Error(
-      `Max weight=${(maxWeight * 100).toFixed(1)}%では全資産を合わせても100%にできません。`
+      `1資産上限${(maxWeight * 100).toFixed(0)}%では、${state.assets.length}資産で合計100%にできません。`
     );
   }
-  if (!Number.isFinite(riskFree)) {
-    throw new Error('Risk-free rateが不正です。');
-  }
 
-  const marketWeights = getNormalizedMarketWeights();
+  const marketWeights = Array(state.assets.length).fill(1 / state.assets.length);
   const views = collectViews();
   const bl = blackLitterman(
     state.covariance,
     marketWeights,
-    delta,
-    tau,
+    MODEL.riskAversion,
+    MODEL.tau,
     views
   );
 
   const weights = optimizeMeanVariance(
     bl.posterior,
     state.covariance,
-    lambda,
+    MODEL.lambda,
     maxWeight
   );
 
-  renderResults(bl.prior, bl.posterior, weights, riskFree);
-  setStatus(
-    `Optimization complete: ${state.assets.length} assets, ${views.P.length} investor view(s).`
+  const frontier = efficientFrontier(
+    bl.posterior,
+    state.covariance,
+    maxWeight
   );
-}
 
-function positiveNumber(id, label) {
-  const x = Number($(id).value);
-  if (!(x > 0) || !Number.isFinite(x)) {
-    throw new Error(`${label}は正の数にしてください。`);
-  }
-  return x;
+  renderResults(bl.prior, bl.posterior, weights, frontier);
+  setStatus(`最適化完了: ${state.assets.length}資産 / 見通し${views.P.length}件`);
 }
 
 function optimizeMeanVariance(mu, cov, lambda, maxWeight) {
@@ -358,7 +288,7 @@ function optimizeMeanVariance(mu, cov, lambda, maxWeight) {
   const largestEigenvalue = Math.max(powerIterationLargestEigenvalue(cov), 1e-8);
   const step = 0.8 / (lambda * largestEigenvalue + 1e-12);
 
-  for (let iter = 0; iter < 10000; iter++) {
+  for (let iter = 0; iter < 12000; iter++) {
     const sigmaW = matVec(cov, w);
     const gradient = mu.map((x, i) => x - lambda * sigmaW[i]);
     const proposal = w.map((x, i) => x + step * gradient[i]);
@@ -370,6 +300,34 @@ function optimizeMeanVariance(mu, cov, lambda, maxWeight) {
   }
 
   return w;
+}
+
+function efficientFrontier(mu, cov, maxWeight) {
+  const lambdas = logSpace(-1.4, 3.6, 64);
+  const points = [];
+
+  for (const lambda of lambdas) {
+    const weights = optimizeMeanVariance(mu, cov, lambda, maxWeight);
+    const expectedReturn = dot(mu, weights);
+    const variance = dot(weights, matVec(cov, weights));
+    const volatility = Math.sqrt(Math.max(variance, 0));
+
+    const duplicate = points.some(
+      (p) => Math.abs(p.volatility - volatility) < 1e-5 &&
+             Math.abs(p.expectedReturn - expectedReturn) < 1e-5
+    );
+    if (!duplicate) points.push({ expectedReturn, volatility, weights });
+  }
+
+  points.sort((a, b) => a.volatility - b.volatility);
+  return points;
+}
+
+function logSpace(startExp, endExp, count) {
+  return Array.from({ length: count }, (_, i) => {
+    const t = count === 1 ? 0 : i / (count - 1);
+    return 10 ** (startExp + (endExp - startExp) * t);
+  });
 }
 
 function projectCappedSimplex(v, cap) {
@@ -384,7 +342,6 @@ function projectCappedSimplex(v, cap) {
   for (let k = 0; k < 120; k++) {
     const theta = (lo + hi) / 2;
     const sum = v.reduce((s, x) => s + clamp(x - theta, 0, cap), 0);
-
     if (sum > 1) lo = theta;
     else hi = theta;
   }
@@ -397,48 +354,35 @@ function projectCappedSimplex(v, cap) {
   return w.map((x) => x / sum);
 }
 
-function powerIterationLargestEigenvalue(a) {
-  const n = a.length;
-  let v = Array(n).fill(1 / Math.sqrt(n));
+function renderResults(prior, posterior, weights, frontier) {
+  const stats = portfolioStats(posterior, state.covariance, weights);
 
-  for (let k = 0; k < 100; k++) {
-    const av = matVec(a, v);
-    const norm = Math.sqrt(dot(av, av));
-    if (norm < 1e-15) return 0;
-    v = av.map((x) => x / norm);
-  }
+  $('metricReturn').textContent = formatPct(stats.expectedReturn);
+  $('metricVol').textContent = formatPct(stats.volatility);
+  $('metricSharpe').textContent = Number.isFinite(stats.sharpe)
+    ? stats.sharpe.toFixed(2)
+    : '—';
 
-  return Math.abs(dot(v, matVec(a, v)));
+  renderAllocation(weights);
+  renderFrontier(frontier, stats);
+  renderForecast(stats.expectedReturn, stats.volatility);
+  renderDetailTable(prior, posterior, weights);
+
+  $('results').classList.remove('hidden');
 }
 
-function renderResults(prior, posterior, weights, riskFree) {
-  const expectedReturn = dot(posterior, weights);
-  const variance = dot(weights, matVec(state.covariance, weights));
+function portfolioStats(mu, cov, weights) {
+  const expectedReturn = dot(mu, weights);
+  const variance = dot(weights, matVec(cov, weights));
   const volatility = Math.sqrt(Math.max(variance, 0));
-  const sharpe = volatility > 0 ? (expectedReturn - riskFree) / volatility : NaN;
+  const sharpe = volatility > 0
+    ? (expectedReturn - MODEL.riskFree) / volatility
+    : NaN;
 
-  $('metricReturn').textContent = formatPct(expectedReturn);
-  $('metricVol').textContent = formatPct(volatility);
-  $('metricSharpe').textContent = Number.isFinite(sharpe) ? sharpe.toFixed(2) : '—';
+  return { expectedReturn, volatility, sharpe };
+}
 
-  const table = $('resultsTable');
-  table.replaceChildren();
-
-  state.assets.forEach((asset, i) => {
-    const tr = document.createElement('tr');
-    [
-      asset,
-      formatPct(prior[i]),
-      formatPct(posterior[i]),
-      formatPct(weights[i])
-    ].forEach((value) => {
-      const td = document.createElement('td');
-      td.textContent = value;
-      tr.append(td);
-    });
-    table.append(tr);
-  });
-
+function renderAllocation(weights) {
   const chart = $('allocationChart');
   chart.replaceChildren();
   const maxShown = Math.max(...weights, 1e-12);
@@ -467,8 +411,244 @@ function renderResults(prior, posterior, weights, riskFree) {
       row.append(label, track, value);
       chart.append(row);
     });
+}
 
-  $('results').classList.remove('hidden');
+function renderFrontier(frontier, selected) {
+  const root = $('frontierChart');
+  root.replaceChildren();
+
+  if (!frontier.length) return;
+
+  const width = 560;
+  const height = 250;
+  const margin = { left: 54, right: 18, top: 16, bottom: 38 };
+  const xValues = frontier.map((p) => p.volatility).concat(selected.volatility);
+  const yValues = frontier.map((p) => p.expectedReturn).concat(selected.expectedReturn);
+  const xMin = Math.max(0, Math.min(...xValues) * 0.92);
+  const xMax = Math.max(...xValues) * 1.06;
+  const yPad = Math.max((Math.max(...yValues) - Math.min(...yValues)) * 0.12, 0.005);
+  const yMin = Math.min(...yValues) - yPad;
+  const yMax = Math.max(...yValues) + yPad;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': 'Efficient frontier'
+  });
+
+  const sx = (x) => margin.left + ((x - xMin) / Math.max(xMax - xMin, 1e-12)) * (width - margin.left - margin.right);
+  const sy = (y) => height - margin.bottom - ((y - yMin) / Math.max(yMax - yMin, 1e-12)) * (height - margin.top - margin.bottom);
+
+  drawAxes(svg, { width, height, margin, xMin, xMax, yMin, yMax, sx, sy, xFormat: formatPctShort, yFormat: formatPctShort });
+
+  const path = frontier.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'} ${sx(p.volatility).toFixed(2)} ${sy(p.expectedReturn).toFixed(2)}`
+  ).join(' ');
+  svg.append(svgEl('path', { d: path, class: 'frontier-line' }));
+
+  for (const p of frontier) {
+    svg.append(svgEl('circle', {
+      cx: sx(p.volatility),
+      cy: sy(p.expectedReturn),
+      r: 2.3,
+      class: 'frontier-point'
+    }));
+  }
+
+  svg.append(svgEl('circle', {
+    cx: sx(selected.volatility),
+    cy: sy(selected.expectedReturn),
+    r: 5.5,
+    class: 'selected-point'
+  }));
+
+  const label = svgEl('text', {
+    x: sx(selected.volatility) + 8,
+    y: sy(selected.expectedReturn) - 8,
+    class: 'chart-label'
+  });
+  label.textContent = '選択ポートフォリオ';
+  svg.append(label);
+
+  root.append(svg);
+}
+
+function renderForecast(mu, sigma) {
+  const root = $('forecastChart');
+  root.replaceChildren();
+
+  const horizon = 10;
+  const steps = 40;
+  const data = [];
+
+  for (let i = 0; i <= steps; i++) {
+    const t = horizon * i / steps;
+    const median = 100 * Math.exp((mu - 0.5 * sigma ** 2) * t);
+    const p10 = 100 * Math.exp((mu - 0.5 * sigma ** 2) * t - 1.2815515655 * sigma * Math.sqrt(t));
+    const p25 = 100 * Math.exp((mu - 0.5 * sigma ** 2) * t - 0.6744897502 * sigma * Math.sqrt(t));
+    const p75 = 100 * Math.exp((mu - 0.5 * sigma ** 2) * t + 0.6744897502 * sigma * Math.sqrt(t));
+    const p90 = 100 * Math.exp((mu - 0.5 * sigma ** 2) * t + 1.2815515655 * sigma * Math.sqrt(t));
+    data.push({ t, median, p10, p25, p75, p90 });
+  }
+
+  const width = 1120;
+  const height = 280;
+  const margin = { left: 56, right: 20, top: 14, bottom: 38 };
+  const yMinRaw = Math.min(...data.map((d) => d.p10));
+  const yMaxRaw = Math.max(...data.map((d) => d.p90));
+  const yPad = Math.max((yMaxRaw - yMinRaw) * 0.06, 5);
+  const yMin = Math.max(0, yMinRaw - yPad);
+  const yMax = yMaxRaw + yPad;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': 'Ten year forecast range'
+  });
+
+  const sx = (x) => margin.left + (x / horizon) * (width - margin.left - margin.right);
+  const sy = (y) => height - margin.bottom - ((y - yMin) / Math.max(yMax - yMin, 1e-12)) * (height - margin.top - margin.bottom);
+
+  drawAxes(svg, {
+    width, height, margin,
+    xMin: 0, xMax: horizon, yMin, yMax, sx, sy,
+    xFormat: (x) => `${Math.round(x)}年`,
+    yFormat: (y) => Math.round(y).toString()
+  });
+
+  svg.append(svgEl('path', {
+    d: areaPath(data, sx, sy, 'p90', 'p10'),
+    class: 'forecast-wide'
+  }));
+  svg.append(svgEl('path', {
+    d: areaPath(data, sx, sy, 'p75', 'p25'),
+    class: 'forecast-inner'
+  }));
+  svg.append(svgEl('path', {
+    d: linePath(data, sx, sy, 'median'),
+    class: 'forecast-median'
+  }));
+
+  root.append(svg);
+  renderForecastSummary(mu, sigma);
+}
+
+function renderForecastSummary(mu, sigma) {
+  const root = $('forecastSummary');
+  root.replaceChildren();
+
+  for (const years of [1, 5, 10]) {
+    const drift = (mu - 0.5 * sigma ** 2) * years;
+    const spread = sigma * Math.sqrt(years);
+    const medianReturn = Math.exp(drift) - 1;
+    const low = Math.exp(drift - 1.2815515655 * spread) - 1;
+    const high = Math.exp(drift + 1.2815515655 * spread) - 1;
+
+    const chip = document.createElement('div');
+    chip.className = 'forecast-chip';
+
+    const label = document.createElement('span');
+    label.textContent = `${years}年後`;
+
+    const value = document.createElement('strong');
+    value.textContent = `中央値 ${formatPct(medianReturn)}　80%範囲 ${formatPct(low)} ～ ${formatPct(high)}`;
+
+    chip.append(label, value);
+    root.append(chip);
+  }
+}
+
+function renderDetailTable(prior, posterior, weights) {
+  const table = $('resultsTable');
+  table.replaceChildren();
+
+  state.assets.forEach((asset, i) => {
+    const tr = document.createElement('tr');
+    [asset, formatPct(prior[i]), formatPct(posterior[i]), formatPct(weights[i])]
+      .forEach((value) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.append(td);
+      });
+    table.append(tr);
+  });
+}
+
+function drawAxes(svg, cfg) {
+  const { width, height, margin, xMin, xMax, yMin, yMax, sx, sy, xFormat, yFormat } = cfg;
+  const xTicks = 5;
+  const yTicks = 4;
+
+  for (let i = 0; i <= xTicks; i++) {
+    const value = xMin + (xMax - xMin) * i / xTicks;
+    const x = sx(value);
+    svg.append(svgEl('line', { x1: x, y1: margin.top, x2: x, y2: height - margin.bottom, class: 'chart-grid' }));
+    const text = svgEl('text', { x, y: height - 14, 'text-anchor': 'middle', class: 'chart-label' });
+    text.textContent = xFormat(value);
+    svg.append(text);
+  }
+
+  for (let i = 0; i <= yTicks; i++) {
+    const value = yMin + (yMax - yMin) * i / yTicks;
+    const y = sy(value);
+    svg.append(svgEl('line', { x1: margin.left, y1: y, x2: width - margin.right, y2: y, class: 'chart-grid' }));
+    const text = svgEl('text', { x: margin.left - 8, y: y + 4, 'text-anchor': 'end', class: 'chart-label' });
+    text.textContent = yFormat(value);
+    svg.append(text);
+  }
+
+  svg.append(svgEl('line', {
+    x1: margin.left,
+    y1: height - margin.bottom,
+    x2: width - margin.right,
+    y2: height - margin.bottom,
+    class: 'chart-axis'
+  }));
+  svg.append(svgEl('line', {
+    x1: margin.left,
+    y1: margin.top,
+    x2: margin.left,
+    y2: height - margin.bottom,
+    class: 'chart-axis'
+  }));
+}
+
+function areaPath(data, sx, sy, upperKey, lowerKey) {
+  const upper = data.map((d, i) =>
+    `${i === 0 ? 'M' : 'L'} ${sx(d.t).toFixed(2)} ${sy(d[upperKey]).toFixed(2)}`
+  ).join(' ');
+  const lower = [...data].reverse().map((d) =>
+    `L ${sx(d.t).toFixed(2)} ${sy(d[lowerKey]).toFixed(2)}`
+  ).join(' ');
+  return `${upper} ${lower} Z`;
+}
+
+function linePath(data, sx, sy, key) {
+  return data.map((d, i) =>
+    `${i === 0 ? 'M' : 'L'} ${sx(d.t).toFixed(2)} ${sy(d[key]).toFixed(2)}`
+  ).join(' ');
+}
+
+function svgEl(tag, attrs = {}) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    el.setAttribute(key, String(value));
+  }
+  return el;
+}
+
+function powerIterationLargestEigenvalue(a) {
+  const n = a.length;
+  let v = Array(n).fill(1 / Math.sqrt(n));
+
+  for (let k = 0; k < 100; k++) {
+    const av = matVec(a, v);
+    const norm = Math.sqrt(dot(av, av));
+    if (norm < 1e-15) return 0;
+    v = av.map((x) => x / norm);
+  }
+
+  return Math.abs(dot(v, matVec(a, v)));
 }
 
 function generateSampleData() {
@@ -586,7 +766,7 @@ function inverse(a) {
     }
 
     if (Math.abs(aug[pivot][col]) < 1e-14) {
-      throw new Error('行列が特異です。価格系列またはViewを見直してください。');
+      throw new Error('行列が特異です。価格系列または見通しを見直してください。');
     }
 
     [aug[col], aug[pivot]] = [aug[pivot], aug[col]];
@@ -612,5 +792,9 @@ function clamp(x, lo, hi) {
 }
 
 function formatPct(x) {
-  return `${(100 * x).toFixed(2)}%`;
+  return `${(100 * x).toFixed(1)}%`;
+}
+
+function formatPctShort(x) {
+  return `${(100 * x).toFixed(0)}%`;
 }
